@@ -1,0 +1,96 @@
+pipeline {
+    agent any
+    parameters{
+        choice(choices: ['development', 'staging', 'production'], description: 'Select Environment for docker build', name: 'Environment')
+    }
+    environment {
+        MAVEN_HOME = tool name: 'maven3', type: 'maven'
+    }
+   	tools{
+		maven "maven3"
+	    }
+	    // First stage 
+    stages {
+        stage('GIT Check Out') {
+            steps {
+                git branch: 'master', url: 'https://github.com/ManikandaprabhuS/my-app.git'
+            }
+        }
+        
+        // second stage
+        stage('Maven Build') {
+            steps {
+                sh 'mvn clean package'
+                sh 'mv target/myweb*.war target/newapp.war'
+		      }
+            }
+            
+        Third Stage
+        stage("Sonarqube Code check") {
+             steps {
+                  withSonarQubeEnv('sonar') {
+                       sh "${MAVEN_HOME}/bin/mvn sonar:sonar"
+                      }
+                }
+        }
+        
+        // Fourth satge 
+       stage ('Docker Build image'){
+			steps{
+				sh "docker build -t manis99/${params.Environment}image:0.0.2 ."
+			}
+		}
+        
+        // Fifth Stage 
+        stage (" Docker Image push to Docker Hub"){
+            steps{
+                 withCredentials([string(credentialsId: 'dockerPass', variable: 'dockerPassword')])
+                     {
+                       sh "docker login -u manis99 -p ${dockerPassword}"
+                      }
+                 sh "docker push manis99/${params.Environment}image:0.0.2"
+            }
+        }
+        // Remove the Exsting container
+        stage('Remove Previous Container'){
+            steps{
+                script{
+	            try{
+		          sh 'docker rm -f secondAppContainer'
+	               }catch(error){
+		           //  do nothing if there is an exception
+	               }
+                }
+            }
+        }
+        // Deploying the code
+        stage('Docker deployment'){
+            steps{
+                script{
+                   
+            sh "docker run -d -p 8090:8080 --name secondAppContainer manis99/${params.Environment}image:0.0.2"
+           }
+        }
+        }
+        
+    }
+// Email Notifications
+    post {
+            failure {
+                emailext body: "Pipeline failed for environment",
+                recipientProviders: [[$class: 'DevelopersRecipientProvider'],
+                [$class: 'RequesterRecipientProvider']], 
+                mimeType: 'text/plain',
+                subject: "Pipeline Failed",
+                to: "gnarmatha682@gmail.com"
+                }
+        success {
+            emailext body: "Pipeline succeeded for environment",
+            recipientProviders: [[$class: 'DevelopersRecipientProvider'],
+            [$class: 'RequesterRecipientProvider']],
+            mimeType: 'text/plain',
+            subject: "Pipeline Successful",
+            to: "gnarmatha682@gmail.com"
+            }
+         }
+}
